@@ -128,6 +128,8 @@ namespace ratgdo {
         float start_closing { -1 };
         observable<float> closing_duration { 0 };
 
+        bool stop_while_closing_workaround { false };
+
         observable<uint16_t> openings { 0 }; // number of times the door has been opened
 
         observable<DoorState> door_state { DoorState::UNKNOWN };
@@ -169,6 +171,7 @@ namespace ratgdo {
 
         // door
         void door_command(uint32_t data);
+        void door_command_(uint32_t data);
         void toggle_door();
         void open_door();
         void close_door();
@@ -180,6 +183,7 @@ namespace ratgdo {
         void schedule_door_position_sync(float update_period = 500);
         void door_position_update();
         void cancel_position_sync_callbacks();
+        void set_stop_while_closing_workaround(bool enabled) { this->stop_while_closing_workaround = enabled; }
 
         // light
         void toggle_light();

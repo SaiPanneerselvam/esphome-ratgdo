@@ -405,6 +405,7 @@ namespace ratgdo {
                 if (ser_byte != 0x55 && ser_byte != 0x01 && ser_byte != 0x00) {
                     ESP_LOG2(TAG, "Ignoring byte: %02X, baud: %d", ser_byte, this->sw_serial_.baudRate());
                     byte_count = 0;
+                    ESP_LOGD(TAG, "Ignoring serial byte %02X", ser_byte);
                     continue;
                 }
                 msg_start = ((msg_start << 8) | ser_byte) & 0xffffff;
@@ -620,7 +621,7 @@ namespace ratgdo {
         }
     }
 
-    void RATGDOComponent::door_command(uint32_t data)
+    void RATGDOComponent::door_command_(uint32_t data)
     {
         data |= (1 << 16); // button 1 ?
         data |= (1 << 8); // button press
@@ -630,6 +631,23 @@ namespace ratgdo {
                 this->send_command(Command::DOOR_ACTION, data2);
             });
         });
+    }
+
+    void RATGDOComponent::door_command(uint32_t data)
+    {
+        if (this->stop_while_closing_workaround && data==data::DOOR_STOP && *this->door_state==DoorState::CLOSING) {
+            ESP_LOGD(TAG, "Using double toggle door stop");
+
+            this->door_command_(data::DOOR_TOGGLE);
+            this->door_state_received.then([=](DoorState s) {
+                if (s==DoorState::OPENING) {
+                    this->door_command(data::DOOR_TOGGLE);
+                }
+            });
+        } else {
+            ESP_LOGD(TAG, "Door command: %X", data);
+            this->door_command_(data);
+        }
     }
 
     void RATGDOComponent::light_on()
