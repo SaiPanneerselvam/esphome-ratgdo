@@ -29,6 +29,26 @@ extern "C" {
 namespace esphome {
 namespace ratgdo {
 
+
+
+    template<typename... X> class OnceCallbacks;
+
+    template<typename... Ts> class OnceCallbacks<void(Ts...)> {
+    public:
+        
+        void then(std::function<void(Ts...)> &&callback) { this->callbacks_.push_back(std::move(callback)); }
+
+        void operator()(Ts... args) {
+            for (auto &cb : this->callbacks_) cb(args...);
+            this->callbacks_.clear();
+        }
+
+    protected:
+        std::vector<std::function<void(Ts...)>> callbacks_;
+    };
+
+
+
     class RATGDOComponent;
     typedef Parented<RATGDOComponent> RATGDOClient;
 
@@ -124,6 +144,9 @@ namespace ratgdo {
         observable<ButtonState> button_state { ButtonState::UNKNOWN };
         observable<MotionState> motion_state { MotionState::UNKNOWN };
 
+        OnceCallbacks<void(DoorState)> door_state_received;
+        OnceCallbacks<void()> command_sent;
+
         observable<bool> sync_failed { false };
 
         void set_output_gdo_pin(InternalGPIOPin* pin) { this->output_gdo_pin_ = pin; }
@@ -136,6 +159,7 @@ namespace ratgdo {
         uint16_t decode_packet(const WirePacket& packet);
         void obstruction_loop();
         void send_command(Command command, uint32_t data = 0, bool increment = true);
+        void send_command(Command command, uint32_t data, bool increment, std::function<void()>&& then);
         bool transmit_packet();
         void encode_packet(Command command, uint32_t data, bool increment, WirePacket& packet);
         void print_packet(const WirePacket& packet) const;

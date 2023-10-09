@@ -16,8 +16,8 @@
 
 #include "esphome/core/log.h"
 
-#define ESP_LOG1 ESP_LOGV
-#define ESP_LOG2 ESP_LOGV
+#define ESP_LOG1 ESP_LOGD
+#define ESP_LOG2 ESP_LOGD
 
 namespace esphome {
 namespace ratgdo {
@@ -199,6 +199,7 @@ namespace ratgdo {
             }
 
             this->door_state = door_state;
+            this->door_state_received(door_state);
             this->light_state = static_cast<LightState>((byte2 >> 1) & 1); // safe because it can only be 0 or 1
             this->lock_state = static_cast<LockState>(byte2 & 1); // safe because it can only be 0 or 1
             this->motion_state = MotionState::CLEAR; // when the status message is read, reset motion state to 0|clear
@@ -325,7 +326,7 @@ namespace ratgdo {
 
     void RATGDOComponent::print_packet(const WirePacket& packet) const
     {
-        ESP_LOG2(TAG, "Counter: %d Send code: [%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X]",
+        ESP_LOGV(TAG, "Counter: %d Send code: [%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X]",
             *this->rolling_code_counter,
             packet[0],
             packet[1],
@@ -448,6 +449,7 @@ namespace ratgdo {
 
     void RATGDOComponent::send_command(Command command, uint32_t data, bool increment)
     {
+        ESP_LOG1(TAG, "Send command: %s, data: %08" PRIx32, Command_to_string(command), data);
         if (!this->transmit_pending_) { // have an untransmitted packet
             this->encode_packet(command, data, increment, this->tx_packet_);
         } else {
@@ -457,6 +459,12 @@ namespace ratgdo {
         }
         this->transmit_packet();
     }
+
+    void RATGDOComponent::send_command(Command command, uint32_t data, bool increment, std::function<void()>&& on_sent) {
+        this->command_sent.then(std::move(on_sent));
+        this->send_command(command, data, increment);
+    }
+
 
     bool RATGDOComponent::transmit_packet()
     {
@@ -483,6 +491,7 @@ namespace ratgdo {
 
         this->sw_serial_.write(this->tx_packet_, PACKET_LENGTH);
         this->transmit_pending_ = false;
+        this->command_sent();
         return true;
     }
 
@@ -531,8 +540,19 @@ namespace ratgdo {
 
     void RATGDOComponent::close_door()
     {
-        if (*this->door_state == DoorState::CLOSING || *this->door_state == DoorState::OPENING) {
+        if (*this->door_state == DoorState::CLOSING) {
             return; // gets ignored by opener
+        }
+
+        if (*this->door_state == DoorState::OPENING) {
+            // have to stop door first, otherwise close command is ignored
+            this->door_command(data::DOOR_STOP);
+            this->door_state_received.then([=](DoorState s) {
+                if (s==DoorState::STOPPED) {
+                    this->door_command(data::DOOR_CLOSE);
+                }
+            });
+            return;
         }
 
         this->door_command(data::DOOR_CLOSE);
@@ -549,10 +569,6 @@ namespace ratgdo {
 
     void RATGDOComponent::toggle_door()
     {
-        if (*this->door_state == DoorState::OPENING) {
-            return; // gets ignored by opener
-        }
-
         this->door_command(data::DOOR_TOGGLE);
     }
 
@@ -603,10 +619,11 @@ namespace ratgdo {
     {
         data |= (1 << 16); // button 1 ?
         data |= (1 << 8); // button press
-        this->send_command(Command::DOOR_ACTION, data, false);
-        set_timeout(200, [=] {
-            auto data2 = data & ~(1 << 8); // button release
-            this->send_command(Command::DOOR_ACTION, data2);
+        this->send_command(Command::DOOR_ACTION, data, false, [=]() {
+            set_timeout(100, [=] {
+                auto data2 = data & ~(1 << 8); // button release
+                this->send_command(Command::DOOR_ACTION, data2);
+            });
         });
     }
 
