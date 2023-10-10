@@ -575,7 +575,12 @@ namespace ratgdo {
     void RATGDOComponent::door_move_to_position(float position)
     {
         if (*this->door_state == DoorState::OPENING || *this->door_state == DoorState::CLOSING) {
-            ESP_LOGW(TAG, "The door is moving, ignoring.");
+            this->door_command(data::DOOR_STOP);
+            this->door_state_received.then([=](DoorState s) {
+                if (s==DoorState::STOPPED) {
+                    this->door_move_to_position(position);
+                }
+            });
             return;
         }
 
